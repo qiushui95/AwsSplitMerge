@@ -55,11 +55,12 @@ class Handler : RequestHandler<S3Event, Unit> {
             ?: throw RuntimeException("config is null")
 
         val dir = File("/tmp")
+        val dloadStart = System.currentTimeMillis()
 
         config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
             .forEach { it.join() }
 
-        context.logger.log("下载完成,开始合并文件")
+        context.logger.log("下载完成,耗时${System.currentTimeMillis()-dloadStart}ms,开始合并文件")
 
         val mergeStart = System.currentTimeMillis()
 
@@ -70,7 +71,7 @@ class Handler : RequestHandler<S3Event, Unit> {
         compressFile.createNewFile()
 
         compressFile.outputStream().use { output ->
-            config.split.map { File(it.key) }
+            config.split.map { File(dir,it.key) }
                 .onEach { splitFile ->
                     splitFile.inputStream().use { input ->
                         input.copyTo(output)
