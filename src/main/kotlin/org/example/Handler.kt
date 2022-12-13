@@ -9,21 +9,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.core.sync.RequestBody
-import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.GetObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import java.io.File
-import java.util.zip.GZIPInputStream
-import java.util.zip.GZIPOutputStream
 
 class Handler : RequestHandler<S3Event, Unit> {
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
-    private val dloadDispatcher = Dispatchers.IO
+    private val dloadDispatcher = Dispatchers.IO.limitedParallelism(5)
 
     override fun handleRequest(input: S3Event?, context: Context?): Unit = runBlocking {
         val start = System.currentTimeMillis()
@@ -32,7 +27,6 @@ class Handler : RequestHandler<S3Event, Unit> {
         context ?: throw RuntimeException("context is null")
 
         context.logger.log("version:5")
-
 
         context.logger.log("开始创建Client")
 
