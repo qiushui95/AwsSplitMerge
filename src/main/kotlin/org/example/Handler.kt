@@ -23,7 +23,7 @@ import java.util.zip.GZIPOutputStream
 class Handler : RequestHandler<S3Event, Unit> {
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
-    private val dloadDispatcher = Dispatchers.IO.limitedParallelism(10)
+    private val dloadDispatcher = Dispatchers.IO
 
     override fun handleRequest(input: S3Event?, context: Context?): Unit = runBlocking {
         val start = System.currentTimeMillis()
@@ -36,12 +36,12 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         context.logger.log("开始创建Client")
 
-        val clientStart=System.currentTimeMillis()
+        val clientStart = System.currentTimeMillis()
 
         val s3Client = S3Client.builder()
             .build()
 
-        context.logger.log("创建Client完成,耗时${System.currentTimeMillis()-clientStart}ms")
+        context.logger.log("创建Client完成,耗时${System.currentTimeMillis() - clientStart}ms")
 
         val record = input.records.getOrNull(0) ?: throw RuntimeException("record is null")
 
@@ -77,6 +77,8 @@ class Handler : RequestHandler<S3Event, Unit> {
         val dstFile = File(dir, config.key)
 
         if (dstFile.exists()) dstFile.delete()
+
+        if (!dstFile.parentFile.exists()) dstFile.parentFile.mkdirs()
 
         dstFile.createNewFile()
 
@@ -145,10 +147,6 @@ class Handler : RequestHandler<S3Event, Unit> {
         logger.log("[${info.key}]下载完成,耗时${System.currentTimeMillis() - startTime}ms")
 
         if (dstFile.length() != info.size) throw RuntimeException("download size(${dstFile.length()}) != upload size(${info.size})")
-
-    }
-
-    private fun mergeSplit(splitList: List<File>) {
 
     }
 }
