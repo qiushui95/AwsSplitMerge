@@ -54,14 +54,16 @@ class Handler : RequestHandler<S3Event, Unit> {
             .run(configAdapter::fromJson)
             ?: throw RuntimeException("config is null")
 
-        config.split.map { dloadSplit(context.logger, s3Client, srcBucket, it) }
+        val dir = File("/tmp")
+
+        config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
             .forEach { it.join() }
 
         context.logger.log("下载完成,开始合并文件")
 
         val mergeStart = System.currentTimeMillis()
 
-        val compressFile = File("merge.gzip")
+        val compressFile = File(dir,"merge.gzip")
 
         if (compressFile.exists()) compressFile.delete()
 
@@ -80,7 +82,7 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         val unzipStart = System.currentTimeMillis()
 
-        val dstFile = File(config.key)
+        val dstFile = File(dir,config.key)
 
         dstFile.parentFile.mkdirs()
 
@@ -118,6 +120,7 @@ class Handler : RequestHandler<S3Event, Unit> {
     private fun CoroutineScope.dloadSplit(
         logger: LambdaLogger,
         s3Client: S3Client,
+        dir: File,
         bucket: String,
         info: SplitInfo
     ) = launch(dloadDispatcher) {
@@ -130,7 +133,7 @@ class Handler : RequestHandler<S3Event, Unit> {
             .key(info.key)
             .build()
 
-        val dstFile = File(info.key)
+        val dstFile = File(dir, info.key)
 
         val parentFile = dstFile.parentFile
 
