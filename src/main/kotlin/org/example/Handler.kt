@@ -33,18 +33,12 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         context.logger.log("version:5")
 
-        val accessKeyId = System.getenv("accessKeyId")
-        val secretAccessKey = System.getenv("secretAccessKey")
-
-        val credentials = AwsBasicCredentials.create(accessKeyId, secretAccessKey)
 
         context.logger.log("开始创建Client")
 
         val clientStart=System.currentTimeMillis()
 
         val s3Client = S3Client.builder()
-            .region(Region.AP_SOUTHEAST_1)
-            .credentialsProvider(StaticCredentialsProvider.create(credentials))
             .build()
 
         context.logger.log("创建Client完成,耗时${System.currentTimeMillis()-clientStart}ms")
