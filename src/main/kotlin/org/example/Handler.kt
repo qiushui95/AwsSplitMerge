@@ -141,8 +141,6 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         if (dstFile.exists()) dstFile.delete()
 
-        logger.log("${dstFile.absolutePath},${dstFile.parentFile.exists()}")
-
         dstFile.createNewFile()
 
         s3Client.getObject(splitRequest).use { input ->
@@ -151,8 +149,9 @@ class Handler : RequestHandler<S3Event, Unit> {
             }
         }
 
+        logger.log("[${info.key}]下载完成,耗时${System.currentTimeMillis() - startTime}ms")
+
         if (dstFile.length() != info.size) throw RuntimeException("download size(${dstFile.length()}) != upload size(${info.size})")
 
-        logger.log("[${info.key}]下载完成,耗时${System.currentTimeMillis() - startTime}ms")
     }
 }
