@@ -52,11 +52,18 @@ class Handler : RequestHandler<S3Event, Unit> {
             .key(srcKey)
             .build()
 
+        context.logger.log("开始读取配置")
+
+        val configStart = System.currentTimeMillis()
+
         val config = s3Client.getObjectAsBytes(jsonFileRequest).asUtf8String()
             .run(configAdapter::fromJson)
             ?: throw RuntimeException("config is null")
 
+        context.logger.log("配置读取完成,耗时${System.currentTimeMillis() - configStart}ms,开始下载文件")
+
         val dir = File("/tmp")
+
         val dloadStart = System.currentTimeMillis()
 
         config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
@@ -93,8 +100,8 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         dstFile.createNewFile()
 
-        GZIPOutputStream(dstFile.outputStream()).use { output ->
-            compressFile.inputStream().use { input ->
+        GZIPOutputStream(compressFile.outputStream()).use { output ->
+            dstFile.inputStream().use { input ->
                 input.copyTo(output)
             }
         }
@@ -157,6 +164,10 @@ class Handler : RequestHandler<S3Event, Unit> {
         logger.log("[${info.key}]下载完成,耗时${System.currentTimeMillis() - startTime}ms")
 
         if (dstFile.length() != info.size) throw RuntimeException("download size(${dstFile.length()}) != upload size(${info.size})")
+
+    }
+
+    private fun mergeSplit(splitList: List<File>) {
 
     }
 }
