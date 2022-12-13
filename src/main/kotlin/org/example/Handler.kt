@@ -17,6 +17,7 @@ import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.GetObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import java.io.File
+import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 class Handler : RequestHandler<S3Event, Unit> {
@@ -37,10 +38,16 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         val credentials = AwsBasicCredentials.create(accessKeyId, secretAccessKey)
 
+        context.logger.log("开始创建Client")
+
+        val clientStart=System.currentTimeMillis()
+
         val s3Client = S3Client.builder()
             .region(Region.AP_SOUTHEAST_1)
             .credentialsProvider(StaticCredentialsProvider.create(credentials))
             .build()
+
+        context.logger.log("创建Client完成,耗时${System.currentTimeMillis()-clientStart}ms")
 
         val record = input.records.getOrNull(0) ?: throw RuntimeException("record is null")
 
@@ -100,8 +107,8 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         dstFile.createNewFile()
 
-        GZIPOutputStream(compressFile.outputStream()).use { output ->
-            dstFile.inputStream().use { input ->
+        GZIPInputStream(compressFile.inputStream()).use { input ->
+            dstFile.outputStream().use { output ->
                 input.copyTo(output)
             }
         }
