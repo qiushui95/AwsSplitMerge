@@ -17,6 +17,7 @@ import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.GetObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import java.io.File
+import java.util.zip.GZIPOutputStream
 
 class Handler : RequestHandler<S3Event, Unit> {
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
@@ -53,22 +54,20 @@ class Handler : RequestHandler<S3Event, Unit> {
             .run(configAdapter::fromJson)
             ?: throw RuntimeException("config is null")
 
-        val dir = File("split")
-
-        if (dir.exists()) dir.delete()
-
-        dir.mkdirs()
-
-        config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
+        config.split.map { dloadSplit(context.logger, s3Client, srcBucket, it) }
             .forEach { it.join() }
 
-        val dstFile = File(dir, config.key)
+        context.logger.log("下载完成,开始合并文件")
 
-        if (dstFile.exists()) dstFile.delete()
+        val mergeStart = System.currentTimeMillis()
 
-        dstFile.createNewFile()
+        val compressFile = File("merge.gzip")
 
-        dstFile.outputStream().use { output ->
+        if (compressFile.exists()) compressFile.delete()
+
+        compressFile.createNewFile()
+
+        compressFile.outputStream().use { output ->
             config.split.map { File(it.key) }
                 .onEach { splitFile ->
                     splitFile.inputStream().use { input ->
@@ -77,14 +76,40 @@ class Handler : RequestHandler<S3Event, Unit> {
                 }.forEach { it.delete() }
         }
 
+        context.logger.log("合并完成,耗时${System.currentTimeMillis() - mergeStart}ms,开始解压文件")
+
+        val unzipStart = System.currentTimeMillis()
+
+        val dstFile = File(config.key)
+
+        dstFile.parentFile.mkdirs()
+
+        if (dstFile.exists()) dstFile.delete()
+
+        dstFile.createNewFile()
+
+        GZIPOutputStream(dstFile.outputStream()).use { output ->
+            compressFile.inputStream().use { input ->
+                input.copyTo(output)
+            }
+        }
+
+        compressFile.delete()
+
+        context.logger.log("解压完成,耗时${System.currentTimeMillis() - unzipStart}ms,开始上传文件")
+
+        val uploadStart = System.currentTimeMillis()
+
         val putRequest = PutObjectRequest.builder()
             .bucket(srcBucket)
             .key(config.key)
             .build()
 
-        s3Client.putObject(putRequest, RequestBody.fromFile(dstFile))
+        s3Client.putObject(putRequest, RequestBody.fromFile(compressFile))
 
-        dstFile.delete()
+        context.logger.log("上传完成,耗时${System.currentTimeMillis() - uploadStart}ms")
+
+        compressFile.delete()
 
         s3Client.close()
     }
@@ -93,7 +118,6 @@ class Handler : RequestHandler<S3Event, Unit> {
     private fun CoroutineScope.dloadSplit(
         logger: LambdaLogger,
         s3Client: S3Client,
-        dir: File,
         bucket: String,
         info: SplitInfo
     ) = launch(dloadDispatcher) {
@@ -106,7 +130,11 @@ class Handler : RequestHandler<S3Event, Unit> {
             .key(info.key)
             .build()
 
-        val dstFile = File(dir, info.key)
+        val dstFile = File(info.key)
+
+        val parentFile = dstFile.parentFile
+
+        if (!parentFile.exists()) parentFile.mkdirs()
 
         if (dstFile.exists()) dstFile.delete()
 
