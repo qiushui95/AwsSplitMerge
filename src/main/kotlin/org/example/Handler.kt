@@ -25,6 +25,8 @@ class Handler : RequestHandler<S3Event, Unit> {
     private val dloadDispatcher = Dispatchers.IO.limitedParallelism(10)
 
     override fun handleRequest(input: S3Event?, context: Context?): Unit = runBlocking {
+        val start = System.currentTimeMillis()
+
         input ?: throw RuntimeException("input is null")
         context ?: throw RuntimeException("context is null")
 
@@ -60,18 +62,18 @@ class Handler : RequestHandler<S3Event, Unit> {
         config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
             .forEach { it.join() }
 
-        context.logger.log("下载完成,耗时${System.currentTimeMillis()-dloadStart}ms,开始合并文件")
+        context.logger.log("下载完成,耗时${System.currentTimeMillis() - dloadStart}ms,开始合并文件")
 
         val mergeStart = System.currentTimeMillis()
 
-        val compressFile = File(dir,"merge.gzip")
+        val compressFile = File(dir, "merge.gzip")
 
         if (compressFile.exists()) compressFile.delete()
 
         compressFile.createNewFile()
 
         compressFile.outputStream().use { output ->
-            config.split.map { File(dir,it.key) }
+            config.split.map { File(dir, it.key) }
                 .onEach { splitFile ->
                     splitFile.inputStream().use { input ->
                         input.copyTo(output)
@@ -83,7 +85,7 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         val unzipStart = System.currentTimeMillis()
 
-        val dstFile = File(dir,config.key)
+        val dstFile = File(dir, config.key)
 
         dstFile.parentFile.mkdirs()
 
@@ -108,13 +110,15 @@ class Handler : RequestHandler<S3Event, Unit> {
             .key(config.key)
             .build()
 
-        s3Client.putObject(putRequest, RequestBody.fromFile(compressFile))
+        s3Client.putObject(putRequest, RequestBody.fromFile(dstFile))
 
         context.logger.log("上传完成,耗时${System.currentTimeMillis() - uploadStart}ms")
 
-        compressFile.delete()
+        dstFile.delete()
 
         s3Client.close()
+
+        context.logger.log("处理完成,耗时${System.currentTimeMillis() - start}ms")
     }
 
 
