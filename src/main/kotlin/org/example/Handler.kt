@@ -138,6 +138,8 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         if (dstFile.exists()) dstFile.delete()
 
+        logger.log("${dstFile.absolutePath},${dstFile.parentFile.exists()}")
+
         dstFile.createNewFile()
 
         s3Client.getObject(splitRequest).use { input ->
