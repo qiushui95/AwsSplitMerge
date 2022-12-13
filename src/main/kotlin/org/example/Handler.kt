@@ -74,13 +74,13 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         val mergeStart = System.currentTimeMillis()
 
-        val compressFile = File(dir, "merge.gzip")
+        val dstFile = File(dir, config.key)
 
-        if (compressFile.exists()) compressFile.delete()
+        if (dstFile.exists()) dstFile.delete()
 
-        compressFile.createNewFile()
+        dstFile.createNewFile()
 
-        compressFile.outputStream().use { output ->
+        dstFile.outputStream().use { output ->
             config.split.map { File(dir, it.key) }
                 .onEach { splitFile ->
                     splitFile.inputStream().use { input ->
@@ -89,27 +89,7 @@ class Handler : RequestHandler<S3Event, Unit> {
                 }.forEach { it.delete() }
         }
 
-        context.logger.log("合并完成,耗时${System.currentTimeMillis() - mergeStart}ms,开始解压文件")
-
-        val unzipStart = System.currentTimeMillis()
-
-        val dstFile = File(dir, config.key)
-
-        dstFile.parentFile.mkdirs()
-
-        if (dstFile.exists()) dstFile.delete()
-
-        dstFile.createNewFile()
-
-        GZIPInputStream(compressFile.inputStream()).use { input ->
-            dstFile.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
-
-        compressFile.delete()
-
-        context.logger.log("解压完成,耗时${System.currentTimeMillis() - unzipStart}ms,开始上传文件")
+        context.logger.log("合并完成,耗时${System.currentTimeMillis() - mergeStart}ms,开始上传文件")
 
         val uploadStart = System.currentTimeMillis()
 
