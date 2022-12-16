@@ -3,6 +3,7 @@ package org.example
 import com.amazonaws.services.lambda.runtime.Context
 import com.amazonaws.services.lambda.runtime.RequestHandler
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent
+import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,20 +13,21 @@ import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.*
 
-class Handler : RequestHandler<APIGatewayV2HTTPEvent, Unit> {
+class Handler : RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
 
     private val dloadDispatcher = Dispatchers.IO.limitedParallelism(20)
 
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
-    override fun handleRequest(input: APIGatewayV2HTTPEvent?, context: Context?): Unit = runBlocking {
+    override fun handleRequest(input: APIGatewayV2HTTPEvent?, context: Context?): APIGatewayV2HTTPResponse =
+        runBlocking {
 
-        input ?: throw RuntimeException("input is null")
-        context ?: throw RuntimeException("context is null")
+            input ?: throw RuntimeException("input is null")
+            context ?: throw RuntimeException("context is null")
 
-        val mergeConfig = input.body?.run(configAdapter::fromJson) ?: throw RuntimeException("mergeConfig is null")
+            val mergeConfig = input.body?.run(configAdapter::fromJson) ?: throw RuntimeException("mergeConfig is null")
 
-        context.logger.log(mergeConfig.toString())
+            context.logger.log(mergeConfig.toString())
 //
 //        context.logger.log("version:6")
 //
@@ -41,7 +43,11 @@ class Handler : RequestHandler<APIGatewayV2HTTPEvent, Unit> {
 //        checkExists(this, input, s3Client)
 //
 //        s3Client.close()
-    }
+
+            APIGatewayV2HTTPResponse().apply {
+                statusCode = 200
+            }
+        }
 
     private suspend fun checkExists(scope: CoroutineScope, config: MergeConfig, s3Client: S3Client) {
         val totalSize = config.split.sumOf { it.size }
