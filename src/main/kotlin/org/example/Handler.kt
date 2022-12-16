@@ -19,7 +19,7 @@ import java.util.UUID
 class Handler : RequestHandler<S3Event, Unit> {
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
-    private val dloadDispatcher = Dispatchers.IO.limitedParallelism(5)
+    private val dloadDispatcher = Dispatchers.IO
 
     override fun handleRequest(input: S3Event?, context: Context?): Unit = runBlocking {
         val start = System.currentTimeMillis()
