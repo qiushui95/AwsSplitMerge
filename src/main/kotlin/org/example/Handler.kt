@@ -81,22 +81,19 @@ class Handler : RequestHandler<S3Event, Unit> {
             context.logger.log("下载完成,耗时${System.currentTimeMillis() - dloadStart}ms")
         }
 
-        val uploadPartList = config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
-            .onEach { it.join() }
-            .mapIndexed { index, _ ->
-                val partNumber = index + 1
-                val request = UploadPartRequest.builder()
-                    .bucket(srcBucket)
-                    .key(config.key)
-                    .partNumber(partNumber)
-                    .uploadId(createMultipartUploadResponse.uploadId())
-                    .build()
+        val uploadPartList = List(dloadJobList.size) { index ->
+            val partNumber = index + 1
+            val request = UploadPartRequest.builder()
+                .bucket(srcBucket)
+                .key(config.key)
+                .partNumber(partNumber)
+                .uploadId(createMultipartUploadResponse.uploadId())
+                .build()
 
-                val eTag = s3Client.uploadPart(request, RequestBody.fromFile(File(dir, config.split[index].key))).eTag()
+            val eTag = s3Client.uploadPart(request, RequestBody.fromFile(File(dir, config.split[index].key))).eTag()
 
-                CompletedPart.builder().partNumber(partNumber).eTag(eTag).build()
-            }
-
+            CompletedPart.builder().partNumber(partNumber).eTag(eTag).build()
+        }
 
         val completedMultipartUpload = CompletedMultipartUpload.builder()
             .parts(uploadPartList)
