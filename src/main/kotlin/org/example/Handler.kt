@@ -19,35 +19,35 @@ class Handler : RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> 
 
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
-    override fun handleRequest(input: APIGatewayV2HTTPEvent?, context: Context?): APIGatewayV2HTTPResponse =
-        runBlocking {
+    override fun handleRequest(
+        input: APIGatewayV2HTTPEvent?,
+        context: Context?
+    ): APIGatewayV2HTTPResponse = runBlocking {
 
-            input ?: throw RuntimeException("input is null")
-            context ?: throw RuntimeException("context is null")
+        input ?: throw RuntimeException("input is null")
+        context ?: throw RuntimeException("context is null")
 
-            val mergeConfig = input.body?.run(configAdapter::fromJson) ?: throw RuntimeException("mergeConfig is null")
+        val mergeConfig = input.body?.run(configAdapter::fromJson) ?: throw RuntimeException("mergeConfig is null")
 
-            context.logger.log(mergeConfig.toString())
-//
-//        context.logger.log("version:6")
-//
-//        context.logger.log("开始创建Client")
-//
-//        val clientStart = System.currentTimeMillis()
-//
-//        val s3Client = S3Client.builder()
-//            .build()
-//
-//        context.logger.log("创建Client完成,耗时${System.currentTimeMillis() - clientStart}ms")
-//
-//        checkExists(this, input, s3Client)
-//
-//        s3Client.close()
+        context.logger.log("version:6")
 
-            APIGatewayV2HTTPResponse().apply {
-                statusCode = 200
-            }
+        context.logger.log("开始创建Client")
+
+        val clientStart = System.currentTimeMillis()
+
+        val s3Client = S3Client.builder()
+            .build()
+
+        context.logger.log("创建Client完成,耗时${System.currentTimeMillis() - clientStart}ms")
+
+        checkExists(this, mergeConfig, s3Client)
+
+        s3Client.close()
+
+        APIGatewayV2HTTPResponse().apply {
+            statusCode = 200
         }
+    }
 
     private suspend fun checkExists(scope: CoroutineScope, config: MergeConfig, s3Client: S3Client) {
         val totalSize = config.split.sumOf { it.size }
