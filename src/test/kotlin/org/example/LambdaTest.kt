@@ -27,7 +27,7 @@ fun main() {
 
     val start = System.currentTimeMillis()
 
-    println("开始调用$start")
+    println("开始调用,$start")
 
     val response = lambdaClient.invoke(invokeRequest)
 

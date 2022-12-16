@@ -47,6 +47,8 @@ class Handler : RequestStreamHandler {
         checkExists(this, mergeConfig, s3Client)
 
         s3Client.close()
+
+        context.logger.log("version:6,${System.currentTimeMillis()}")
     }
 
     private suspend fun checkExists(scope: CoroutineScope, config: MergeConfig, s3Client: S3Client) {
