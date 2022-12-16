@@ -1,8 +1,13 @@
 package org.example
 
 
-data class MergeConfig(
-    val key: String="",
-    val bucket: String="",
-    val split: List<SplitInfo> = emptyList()
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
+
+@JsonClass(generateAdapter = true)
+data class SplitInfo(
+    @Json(name = "key")
+    val key: String,
+    @Json(name = "size")
+    val size: Long
 )
