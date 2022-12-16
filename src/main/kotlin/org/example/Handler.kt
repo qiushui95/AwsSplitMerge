@@ -53,7 +53,11 @@ class Handler : RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> 
         val totalSize = config.split.sumOf { it.size }
 
         val attributesResponse = try {
-            s3Client.getObjectAttributes(GetObjectAttributesRequest.builder().build())
+            val getObjectAttributesRequest = GetObjectAttributesRequest.builder()
+                .bucket(config.bucket)
+                .key(config.key)
+                .build()
+            s3Client.getObjectAttributes(getObjectAttributesRequest)
         } catch (ex: NoSuchKeyException) {
             doMerge(scope, config, s3Client)
             return
