@@ -124,9 +124,6 @@ class Handler : RequestHandler<S3Event, Unit> {
         bucket: String,
         info: SplitInfo
     ) = launch(dloadDispatcher) {
-        val startTime = System.currentTimeMillis()
-
-        logger.log("[${info.key}]开始下载")
 
         val splitRequest = GetObjectRequest.builder()
             .bucket(bucket)
@@ -148,8 +145,6 @@ class Handler : RequestHandler<S3Event, Unit> {
                 input.copyTo(output)
             }
         }
-
-        logger.log("[${info.key}]下载完成,耗时${System.currentTimeMillis() - startTime}ms")
 
         if (dstFile.length() != info.size) throw RuntimeException("download size(${dstFile.length()}) != upload size(${info.size})")
 
