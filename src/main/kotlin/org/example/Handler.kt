@@ -74,12 +74,7 @@ class Handler : RequestHandler<S3Event, Unit> {
         val dloadStart = System.currentTimeMillis()
 
         val dloadJobList = config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
-
-        launch {
-            dloadJobList.forEach { it.join() }
-
-            context.logger.log("下载完成,耗时${System.currentTimeMillis() - dloadStart}ms")
-        }
+        
 
         val uploadPartList = dloadJobList.onEach { it.join() }.mapIndexed { index, _ ->
             val partNumber = index + 1
