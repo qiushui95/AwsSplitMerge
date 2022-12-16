@@ -1,33 +1,37 @@
 package org.example
 
 import com.amazonaws.services.lambda.runtime.Context
-import com.amazonaws.services.lambda.runtime.RequestHandler
-import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent
-import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse
+import com.amazonaws.services.lambda.runtime.RequestStreamHandler
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import okio.Buffer
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.*
+import java.io.InputStream
+import java.io.OutputStream
 
-class Handler : RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
+class Handler : RequestStreamHandler {
 
     private val dloadDispatcher = Dispatchers.IO.limitedParallelism(20)
 
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
-    override fun handleRequest(
-        input: APIGatewayV2HTTPEvent?,
-        context: Context?
-    ): APIGatewayV2HTTPResponse = runBlocking {
+    override fun handleRequest(input: InputStream?, output: OutputStream?, context: Context?): Unit = runBlocking {
 
         input ?: throw RuntimeException("input is null")
         context ?: throw RuntimeException("context is null")
 
-        val mergeConfig = input.body?.run(configAdapter::fromJson) ?: throw RuntimeException("mergeConfig is null")
+        val buffer = Buffer()
+
+        buffer.readFrom(input)
+
+        val mergeConfig = configAdapter.fromJson(buffer) ?: throw RuntimeException("mergeConfig is null")
+
+        input.close()
 
         context.logger.log("version:6")
 
@@ -43,10 +47,6 @@ class Handler : RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> 
         checkExists(this, mergeConfig, s3Client)
 
         s3Client.close()
-
-        APIGatewayV2HTTPResponse().apply {
-            statusCode = 200
-        }
     }
 
     private suspend fun checkExists(scope: CoroutineScope, config: MergeConfig, s3Client: S3Client) {
