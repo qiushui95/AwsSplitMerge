@@ -33,7 +33,7 @@ class Handler : RequestStreamHandler {
 
         input.close()
 
-        context.logger.log("version:6")
+        context.logger.log("version:6,${System.currentTimeMillis()}")
 
         context.logger.log("开始创建Client")
 

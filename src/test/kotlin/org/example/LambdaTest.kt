@@ -1,10 +1,9 @@
 package org.example
 
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
-import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
-import software.amazon.awssdk.awscore.client.builder.AwsDefaultClientBuilder
 import software.amazon.awssdk.core.SdkBytes
+import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.lambda.LambdaClient
 import software.amazon.awssdk.services.lambda.model.InvokeRequest
 
@@ -13,6 +12,7 @@ fun main() {
 
     val lambdaClient = LambdaClient.builder()
         .credentialsProvider(StaticCredentialsProvider.create(credentials))
+        .region(Region.AP_SOUTHEAST_1)
         .build()
 
     val json =
@@ -27,9 +27,9 @@ fun main() {
 
     val start = System.currentTimeMillis()
 
-    println("开始调用")
+    println("开始调用$start")
 
-    lambdaClient.invoke(invokeRequest)
+    val response = lambdaClient.invoke(invokeRequest)
 
-    println("结束调用,${System.currentTimeMillis() - start}ms")
+    println("结束调用,${response.statusCode()},${System.currentTimeMillis() - start}ms,${System.currentTimeMillis()}")
 }
