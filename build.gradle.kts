@@ -21,7 +21,7 @@ dependencies {
     runtimeOnly("com.amazonaws:aws-lambda-java-log4j2:1.5.1")
 
     implementation("software.amazon.awssdk:s3:2.18.39")
-    implementation("software.amazon.awssdk:lambda:2.18.39")
+    testImplementation("software.amazon.awssdk:lambda:2.18.39")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
 
