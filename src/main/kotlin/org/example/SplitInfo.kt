@@ -8,6 +8,8 @@ import com.squareup.moshi.JsonClass
 data class MergeConfig(
     @Json(name = "key")
     val key: String,
+    @Json(name = "bucket")
+    val bucket: String,
     @Json(name = "split")
     val split: List<SplitInfo>
 )
