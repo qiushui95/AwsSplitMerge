@@ -56,6 +56,7 @@ class Handler : RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> 
             val getObjectAttributesRequest = GetObjectAttributesRequest.builder()
                 .bucket(config.bucket)
                 .key(config.key)
+                .objectAttributes(ObjectAttributes.OBJECT_SIZE)
                 .build()
             s3Client.getObjectAttributes(getObjectAttributesRequest)
         } catch (ex: NoSuchKeyException) {
