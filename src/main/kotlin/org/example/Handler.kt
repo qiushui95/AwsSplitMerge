@@ -5,10 +5,7 @@ import com.amazonaws.services.lambda.runtime.LambdaLogger
 import com.amazonaws.services.lambda.runtime.RequestHandler
 import com.amazonaws.services.lambda.runtime.events.S3Event
 import com.squareup.moshi.Moshi
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.*
@@ -63,7 +60,6 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         val dir = File("/tmp")
 
-
         val createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
             .bucket(srcBucket)
             .key(config.key)
@@ -71,24 +67,20 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         val createMultipartUploadResponse = s3Client.createMultipartUpload(createMultipartUploadRequest)
 
-        val dloadStart = System.currentTimeMillis()
-
-        val dloadJobList = config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
-        
-
-        val uploadPartList = dloadJobList.onEach { it.join() }.mapIndexed { index, _ ->
+        val dloadJobList = config.split.mapIndexed { index, splitInfo ->
             val partNumber = index + 1
-            val request = UploadPartRequest.builder()
+
+            val partRequest = UploadPartRequest.builder()
                 .bucket(srcBucket)
                 .key(config.key)
                 .partNumber(partNumber)
                 .uploadId(createMultipartUploadResponse.uploadId())
                 .build()
 
-            val eTag = s3Client.uploadPart(request, RequestBody.fromFile(File(dir, config.split[index].key))).eTag()
-
-            CompletedPart.builder().partNumber(partNumber).eTag(eTag).build()
+            dloadSplit(context.logger, s3Client, dir, srcBucket, splitInfo, partRequest)
         }
+
+        val uploadPartList = dloadJobList.map { it.await() }
 
         val completedMultipartUpload = CompletedMultipartUpload.builder()
             .parts(uploadPartList)
@@ -114,8 +106,9 @@ class Handler : RequestHandler<S3Event, Unit> {
         s3Client: S3Client,
         dir: File,
         bucket: String,
-        info: SplitInfo
-    ) = launch(dloadDispatcher) {
+        info: SplitInfo,
+        partRequest: UploadPartRequest
+    ) = async(dloadDispatcher) {
 
         val splitRequest = GetObjectRequest.builder()
             .bucket(bucket)
@@ -140,5 +133,8 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         if (dstFile.length() != info.size) throw RuntimeException("download size(${dstFile.length()}) != upload size(${info.size})")
 
+        val eTag = s3Client.uploadPart(partRequest, RequestBody.fromFile(File(dir, info.key))).eTag()
+
+        CompletedPart.builder().partNumber(partRequest.partNumber()).eTag(eTag).build()
     }
 }
