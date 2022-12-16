@@ -115,26 +115,11 @@ class Handler : RequestHandler<S3Event, Unit> {
             .key(info.key)
             .build()
 
-        val dstFile = File(dir, info.key)
-
-        val parentFile = dstFile.parentFile
-
-        if (!parentFile.exists()) parentFile.mkdirs()
-
-        if (dstFile.exists()) dstFile.delete()
-
-        dstFile.createNewFile()
-
         s3Client.getObject(splitRequest).use { input ->
-            dstFile.outputStream().use { output ->
-                input.copyTo(output)
-            }
+            val eTag = s3Client.uploadPart(partRequest, RequestBody.fromInputStream(input, info.size)).eTag()
+
+            CompletedPart.builder().partNumber(partRequest.partNumber()).eTag(eTag).build()
         }
 
-        if (dstFile.length() != info.size) throw RuntimeException("download size(${dstFile.length()}) != upload size(${info.size})")
-
-        val eTag = s3Client.uploadPart(partRequest, RequestBody.fromFile(File(dir, info.key))).eTag()
-
-        CompletedPart.builder().partNumber(partRequest.partNumber()).eTag(eTag).build()
     }
 }
