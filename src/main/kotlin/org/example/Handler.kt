@@ -71,6 +71,16 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         val createMultipartUploadResponse = s3Client.createMultipartUpload(createMultipartUploadRequest)
 
+        val dloadStart = System.currentTimeMillis()
+
+        val dloadJobList = config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
+
+        launch {
+            dloadJobList.forEach { it.join() }
+
+            context.logger.log("下载完成,耗时${System.currentTimeMillis() - dloadStart}ms")
+        }
+
         val uploadPartList = config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
             .onEach { it.join() }
             .mapIndexed { index, _ ->
