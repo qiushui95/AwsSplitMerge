@@ -11,9 +11,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.model.GetObjectRequest
-import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.model.*
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.InputStream
+import java.io.ObjectInputStream
+import java.nio.ByteBuffer
+import java.util.UUID
 
 class Handler : RequestHandler<S3Event, Unit> {
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
@@ -59,46 +63,42 @@ class Handler : RequestHandler<S3Event, Unit> {
 
         val dir = File("/tmp")
 
-        val dloadStart = System.currentTimeMillis()
 
-        config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
-            .forEach { it.join() }
-
-        context.logger.log("下载完成,耗时${System.currentTimeMillis() - dloadStart}ms,开始合并文件")
-
-        val mergeStart = System.currentTimeMillis()
-
-        val dstFile = File(dir, config.key)
-
-        if (dstFile.exists()) dstFile.delete()
-
-        if (!dstFile.parentFile.exists()) dstFile.parentFile.mkdirs()
-
-        dstFile.createNewFile()
-
-        dstFile.outputStream().use { output ->
-            config.split.map { File(dir, it.key) }
-                .onEach { splitFile ->
-                    splitFile.inputStream().use { input ->
-                        input.copyTo(output)
-                    }
-                }.forEach { it.delete() }
-        }
-
-        context.logger.log("合并完成,耗时${System.currentTimeMillis() - mergeStart}ms,开始上传文件")
-
-        val uploadStart = System.currentTimeMillis()
-
-        val putRequest = PutObjectRequest.builder()
+        val createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
             .bucket(srcBucket)
             .key(config.key)
             .build()
 
-        s3Client.putObject(putRequest, RequestBody.fromFile(dstFile))
+        val createMultipartUploadResponse = s3Client.createMultipartUpload(createMultipartUploadRequest)
 
-        context.logger.log("上传完成,耗时${System.currentTimeMillis() - uploadStart}ms")
+        val uploadPartList = config.split.map { dloadSplit(context.logger, s3Client, dir, srcBucket, it) }
+            .onEach { it.join() }
+            .mapIndexed { index, _ ->
+                val request = UploadPartRequest.builder()
+                    .bucket(srcBucket)
+                    .key(config.key)
+                    .partNumber(index)
+                    .uploadId(createMultipartUploadResponse.uploadId())
+                    .build()
 
-        dstFile.delete()
+                val eTag = s3Client.uploadPart(request, RequestBody.fromFile(File(dir, config.split[index].key))).eTag()
+
+                CompletedPart.builder().partNumber(1).eTag(eTag).build()
+            }
+
+
+        val completedMultipartUpload = CompletedMultipartUpload.builder()
+            .parts(uploadPartList)
+            .build()
+
+        val completeMultipartUploadRequest = CompleteMultipartUploadRequest.builder()
+            .bucket(srcBucket)
+            .key(config.key)
+            .uploadId(createMultipartUploadResponse.uploadId())
+            .multipartUpload(completedMultipartUpload)
+            .build()
+
+        s3Client.completeMultipartUpload { completeMultipartUploadRequest }
 
         s3Client.close()
 
