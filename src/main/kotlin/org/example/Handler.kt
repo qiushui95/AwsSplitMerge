@@ -110,6 +110,10 @@ class Handler : RequestHandler<S3Event, Unit> {
         partRequest: UploadPartRequest
     ) = async(dloadDispatcher) {
 
+        val start = System.currentTimeMillis()
+
+        logger.log("开始下载${info.key}")
+
         val splitRequest = GetObjectRequest.builder()
             .bucket(bucket)
             .key(info.key)
@@ -119,7 +123,8 @@ class Handler : RequestHandler<S3Event, Unit> {
             val eTag = s3Client.uploadPart(partRequest, RequestBody.fromInputStream(input, info.size)).eTag()
 
             CompletedPart.builder().partNumber(partRequest.partNumber()).eTag(eTag).build()
+        }.apply {
+            logger.log("下载${info.key}完成,耗时${System.currentTimeMillis() - start}")
         }
-
     }
 }
