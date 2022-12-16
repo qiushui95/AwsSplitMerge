@@ -2,6 +2,8 @@ package org.example
 
 import com.amazonaws.services.lambda.runtime.Context
 import com.amazonaws.services.lambda.runtime.RequestHandler
+import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent
+import com.squareup.moshi.Moshi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -10,15 +12,20 @@ import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.*
 
-class Handler : RequestHandler<Map<String, String>, Unit> {
+class Handler : RequestHandler<APIGatewayV2HTTPEvent, Unit> {
 
     private val dloadDispatcher = Dispatchers.IO.limitedParallelism(20)
 
-    override fun handleRequest(input: Map<String, String>?, context: Context?): Unit = runBlocking {
-        context?.logger?.log(input?.toString())
+    private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
-//        input ?: throw RuntimeException("input is null")
-//        context ?: throw RuntimeException("context is null")
+    override fun handleRequest(input: APIGatewayV2HTTPEvent?, context: Context?): Unit = runBlocking {
+
+        input ?: throw RuntimeException("input is null")
+        context ?: throw RuntimeException("context is null")
+
+        val mergeConfig = input.body?.run(configAdapter::fromJson) ?: throw RuntimeException("mergeConfig is null")
+
+        context.logger.log(mergeConfig.toString())
 //
 //        context.logger.log("version:6")
 //
