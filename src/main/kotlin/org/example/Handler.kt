@@ -31,6 +31,8 @@ class Handler : RequestStreamHandler {
 
         val mergeConfig = configAdapter.fromJson(buffer) ?: throw RuntimeException("mergeConfig is null")
 
+        context.logger.log(mergeConfig.toString())
+
         input.close()
 
         context.logger.log("version:6,${System.currentTimeMillis()}")
