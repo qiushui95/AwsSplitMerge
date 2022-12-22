@@ -41,7 +41,7 @@ class Handler : RequestStreamHandler {
 
         input.close()
 
-        context.logger.log("version:6,${System.currentTimeMillis()},${context.awsRequestId}")
+        context.logger.log("version:7,${System.currentTimeMillis()},${context.awsRequestId}")
 
         context.logger.log("开始创建Client")
 
@@ -77,11 +77,14 @@ class Handler : RequestStreamHandler {
             .key(mergeConfig.key)
             .build()
 
-        val createMultipartUploadResponse = s3Client.createMultipartUpload(createMultipartUploadRequest)
+        val uploadId = s3Client.createMultipartUpload(createMultipartUploadRequest).uploadId()
 
+        val dir = File("/tmp/${context.awsRequestId.replace("-", "")}")
+
+        dir.mkdirs()
 
         val partList = waitList.map {
-            doMerge(this, createMultipartUploadResponse.uploadId(), mergeConfig, s3Client, it)
+            doMerge(this, dir, uploadId, mergeConfig, s3Client, it)
         }.map { it.await() }
 
         val completedMultipartUpload = CompletedMultipartUpload.builder()
@@ -91,7 +94,7 @@ class Handler : RequestStreamHandler {
         val completeMultipartUploadRequest = CompleteMultipartUploadRequest.builder()
             .bucket(mergeConfig.bucket)
             .key(mergeConfig.key)
-            .uploadId(createMultipartUploadResponse.uploadId())
+            .uploadId(uploadId)
             .multipartUpload(completedMultipartUpload)
             .build()
 
@@ -99,11 +102,14 @@ class Handler : RequestStreamHandler {
 
         s3Client.close()
 
-        context.logger.log("version:6,${System.currentTimeMillis()}")
+        dir.deleteRecursively()
+
+        context.logger.log("version:7,${System.currentTimeMillis()}")
     }
 
     private suspend fun doMerge(
         scope: CoroutineScope,
+        dir: File,
         uploadId: String,
         config: MergeConfig,
         s3Client: S3Client,
@@ -113,7 +119,6 @@ class Handler : RequestStreamHandler {
             return scope.doMerge(uploadId, config, s3Client, mergeGroup.partNumber, mergeGroup.list.first())
         }
 
-        val dir = File("/tmp")
 
         val splitFileList = mergeGroup.list.map {
             scope.async(Dispatchers.IO) {
