@@ -3,27 +3,35 @@ package org.example
 import com.amazonaws.services.lambda.runtime.Context
 import com.amazonaws.services.lambda.runtime.RequestStreamHandler
 import com.squareup.moshi.Moshi
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import okio.Buffer
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.*
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 
 class Handler : RequestStreamHandler {
+    private companion object {
+        const val MIN_BLOCK_SIZE = 5 * 1024 * 1024
+    }
 
     private val dloadDispatcher = Dispatchers.IO.limitedParallelism(20)
 
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
-    override fun handleRequest(input: InputStream?, output: OutputStream?, context: Context?): Unit = runBlocking {
+    private data class MergeGroup(val partNumber: Int, val list: List<SplitInfo>)
+
+    override fun handleRequest(
+        input: InputStream?,
+        output: OutputStream?,
+        context: Context?
+    ): Unit = runBlocking(Dispatchers.IO) {
 
         input ?: throw RuntimeException("input is null")
         context ?: throw RuntimeException("context is null")
+
 
         val buffer = Buffer()
 
@@ -31,11 +39,9 @@ class Handler : RequestStreamHandler {
 
         val mergeConfig = configAdapter.fromJson(buffer) ?: throw RuntimeException("mergeConfig is null")
 
-        context.logger.log(mergeConfig.toString())
-
         input.close()
 
-        context.logger.log("version:6,${System.currentTimeMillis()}")
+        context.logger.log("version:6,${System.currentTimeMillis()},${context.awsRequestId}")
 
         context.logger.log("开始创建Client")
 
@@ -46,87 +52,151 @@ class Handler : RequestStreamHandler {
 
         context.logger.log("创建Client完成,耗时${System.currentTimeMillis() - clientStart}ms")
 
-        checkExists(this, mergeConfig, s3Client)
+        val groupList = mutableListOf<MutableList<SplitInfo>>()
+
+        mergeConfig.split.forEach { splitInfo ->
+            val lastGroup = groupList.lastOrNull()
+
+            if (lastGroup == null || lastGroup.sumOf { it.size } >= MIN_BLOCK_SIZE) {
+                val newList = mutableListOf<SplitInfo>()
+
+                groupList.add(newList)
+
+                newList
+            } else {
+                lastGroup
+            }.add(splitInfo)
+        }
+
+        val waitList = groupList.mapIndexed { index, splitInfos ->
+            MergeGroup(index + 1, splitInfos)
+        }
+
+        val createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
+            .bucket(mergeConfig.bucket)
+            .key(mergeConfig.key)
+            .build()
+
+        val createMultipartUploadResponse = s3Client.createMultipartUpload(createMultipartUploadRequest)
+
+
+        val partList = waitList.map {
+            doMerge(this, createMultipartUploadResponse.uploadId(), mergeConfig, s3Client, it)
+        }.map { it.await() }
+
+        val completedMultipartUpload = CompletedMultipartUpload.builder()
+            .parts(partList)
+            .build()
+
+        val completeMultipartUploadRequest = CompleteMultipartUploadRequest.builder()
+            .bucket(mergeConfig.bucket)
+            .key(mergeConfig.key)
+            .uploadId(createMultipartUploadResponse.uploadId())
+            .multipartUpload(completedMultipartUpload)
+            .build()
+
+        s3Client.completeMultipartUpload(completeMultipartUploadRequest)
 
         s3Client.close()
 
         context.logger.log("version:6,${System.currentTimeMillis()}")
     }
 
-    private suspend fun checkExists(scope: CoroutineScope, config: MergeConfig, s3Client: S3Client) {
-        val totalSize = config.split.sumOf { it.size }
-
-        val attributesResponse = try {
-            val getObjectAttributesRequest = GetObjectAttributesRequest.builder()
-                .bucket(config.bucket)
-                .key(config.key)
-                .objectAttributes(ObjectAttributes.OBJECT_SIZE)
-                .build()
-            s3Client.getObjectAttributes(getObjectAttributesRequest)
-        } catch (ex: NoSuchKeyException) {
-            doMerge(scope, config, s3Client)
-            return
-        }
-
-        if (attributesResponse.objectSize() != totalSize) {
-            s3Client.deleteObject(DeleteObjectRequest.builder().bucket(config.bucket).key(config.key).build())
-            doMerge(scope, config, s3Client)
-        }
-    }
-
-    private suspend fun doMerge(scope: CoroutineScope, config: MergeConfig, s3Client: S3Client) {
-        val createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
-            .bucket(config.bucket)
-            .key(config.key)
-            .build()
-
-        val createMultipartUploadResponse = s3Client.createMultipartUpload(createMultipartUploadRequest)
-
-        val dloadJobList = config.split.mapIndexed { index, splitInfo ->
-            val partNumber = index + 1
-
-            val partRequest = UploadPartRequest.builder()
-                .bucket(config.bucket)
-                .key(config.key)
-                .partNumber(partNumber)
-                .uploadId(createMultipartUploadResponse.uploadId())
-                .build()
-
-            scope.dloadSplit(s3Client, config.bucket, splitInfo, partRequest)
-        }
-
-        val uploadPartList = dloadJobList.map { it.await() }
-
-        val completedMultipartUpload = CompletedMultipartUpload.builder()
-            .parts(uploadPartList)
-            .build()
-
-        val completeMultipartUploadRequest = CompleteMultipartUploadRequest.builder()
-            .bucket(config.bucket)
-            .key(config.key)
-            .uploadId(createMultipartUploadResponse.uploadId())
-            .multipartUpload(completedMultipartUpload)
-            .build()
-
-        s3Client.completeMultipartUpload(completeMultipartUploadRequest)
-    }
-
-    private fun CoroutineScope.dloadSplit(
+    private suspend fun doMerge(
+        scope: CoroutineScope,
+        uploadId: String,
+        config: MergeConfig,
         s3Client: S3Client,
-        bucket: String,
-        info: SplitInfo,
-        partRequest: UploadPartRequest
-    ) = async(dloadDispatcher) {
+        mergeGroup: MergeGroup
+    ): Deferred<CompletedPart> {
+        if (mergeGroup.list.size == 1) {
+            return scope.doMerge(uploadId, config, s3Client, mergeGroup.partNumber, mergeGroup.list.first())
+        }
+
+        val dir = File("/tmp")
+
+        val splitFileList = mergeGroup.list.map {
+            scope.async(Dispatchers.IO) {
+                val dstFile = File(dir, it.key)
+
+                dstFile.parentFile.mkdirs()
+
+                dstFile.createNewFile()
+
+                val request = GetObjectRequest.builder()
+                    .bucket(config.bucket)
+                    .key(it.key)
+                    .build()
+
+                s3Client.getObject(request).use { input ->
+                    dstFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                dstFile
+            }
+        }.map { it.await() }
+
+        val dstFile = File(dir, "block.${mergeGroup.partNumber}")
+
+        dstFile.createNewFile()
+
+        dstFile.outputStream().use { output ->
+
+            splitFileList.forEach { splitFile ->
+                splitFile.inputStream().use { input ->
+                    input.copyTo(output)
+                }
+            }
+        }
+
+        return scope.doMerge(uploadId, config, s3Client, mergeGroup.partNumber, dstFile)
+    }
+
+    private fun CoroutineScope.doMerge(
+        uploadId: String,
+        config: MergeConfig,
+        s3Client: S3Client,
+        partNumber: Int,
+        splitInfo: SplitInfo
+    ) = async(Dispatchers.IO) {
+        val partRequest = UploadPartRequest.builder()
+            .bucket(config.bucket)
+            .key(config.key)
+            .partNumber(partNumber)
+            .uploadId(uploadId)
+            .build()
 
         val splitRequest = GetObjectRequest.builder()
-            .bucket(bucket)
-            .key(info.key)
+            .bucket(config.bucket)
+            .key(splitInfo.key)
             .build()
 
-        s3Client.getObject(splitRequest).use { input ->
-            val eTag = s3Client.uploadPart(partRequest, RequestBody.fromInputStream(input, info.size)).eTag()
-
-            CompletedPart.builder().partNumber(partRequest.partNumber()).eTag(eTag).build()
+        val eTag = s3Client.getObject(splitRequest).use { input ->
+            s3Client.uploadPart(partRequest, RequestBody.fromInputStream(input, splitInfo.size)).eTag()
         }
+
+        CompletedPart.builder().partNumber(partRequest.partNumber()).eTag(eTag).build()
+    }
+
+    private fun CoroutineScope.doMerge(
+        uploadId: String,
+        config: MergeConfig,
+        s3Client: S3Client,
+        partNumber: Int,
+        dstFile: File
+    ) = async(Dispatchers.IO) {
+        val partRequest = UploadPartRequest.builder()
+            .bucket(config.bucket)
+            .key(config.key)
+            .partNumber(partNumber)
+            .uploadId(uploadId)
+            .build()
+
+
+        val eTag = s3Client.uploadPart(partRequest, RequestBody.fromFile(dstFile)).eTag()
+
+        CompletedPart.builder().partNumber(partRequest.partNumber()).eTag(eTag).build()
     }
 }
