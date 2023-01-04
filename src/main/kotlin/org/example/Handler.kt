@@ -5,43 +5,47 @@ import com.amazonaws.services.lambda.runtime.RequestStreamHandler
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.*
 import okio.Buffer
+import org.joda.time.DateTime
+import org.joda.time.DateTimeZone
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.*
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.*
 
 class Handler : RequestStreamHandler {
     private companion object {
         const val MIN_BLOCK_SIZE = 5 * 1024 * 1024
     }
 
-    private val dloadDispatcher = Dispatchers.IO.limitedParallelism(20)
-
     private val configAdapter by lazy { Moshi.Builder().build().adapter(MergeConfig::class.java) }
 
     private data class MergeGroup(val partNumber: Int, val list: List<SplitInfo>)
 
-    override fun handleRequest(
-        input: InputStream?,
-        output: OutputStream?,
-        context: Context?
-    ): Unit = runBlocking(Dispatchers.IO) {
+    private val version = "8"
+
+    private val timeZone = DateTimeZone.forTimeZone(TimeZone.getTimeZone("Asia/Shanghai"))
+    private fun getDateStr() {
+        DateTime.now(timeZone).toString("yyyy-MM-dd HH:mm:ss:SSS")
+    }
+
+    override fun handleRequest(input: InputStream?, output: OutputStream?, context: Context?): Unit = runBlocking {
 
         input ?: throw RuntimeException("input is null")
         context ?: throw RuntimeException("context is null")
 
+        val mergeConfig = input.use { _ ->
+            val buffer = Buffer()
 
-        val buffer = Buffer()
+            buffer.readFrom(input)
 
-        buffer.readFrom(input)
+            configAdapter.fromJson(buffer)
 
-        val mergeConfig = configAdapter.fromJson(buffer) ?: throw RuntimeException("mergeConfig is null")
+        } ?: throw RuntimeException("mergeConfig is null")
 
-        input.close()
-
-        context.logger.log("version:7,${System.currentTimeMillis()},${context.awsRequestId}")
+        context.logger.log("version:$version,${getDateStr()}")
 
         context.logger.log("开始创建Client")
 
@@ -72,16 +76,16 @@ class Handler : RequestStreamHandler {
             MergeGroup(index + 1, splitInfos)
         }
 
+        val dir = File("/tmp/${context.awsRequestId.replace("-", "")}")
+
+        dir.mkdirs()
+
         val createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
             .bucket(mergeConfig.bucket)
             .key(mergeConfig.key)
             .build()
 
         val uploadId = s3Client.createMultipartUpload(createMultipartUploadRequest).uploadId()
-
-        val dir = File("/tmp/${context.awsRequestId.replace("-", "")}")
-
-        dir.mkdirs()
 
         val partList = waitList.map {
             doMerge(this, dir, uploadId, mergeConfig, s3Client, it)
@@ -104,7 +108,7 @@ class Handler : RequestStreamHandler {
 
         dir.deleteRecursively()
 
-        context.logger.log("version:7,${System.currentTimeMillis()}")
+        context.logger.log("version:6,${getDateStr()}")
     }
 
     private suspend fun doMerge(
@@ -145,7 +149,9 @@ class Handler : RequestStreamHandler {
 
         val dstFile = File(dir, "block.${mergeGroup.partNumber}")
 
-        dstFile.createNewFile()
+        withContext(Dispatchers.IO) {
+            dstFile.createNewFile()
+        }
 
         dstFile.outputStream().use { output ->
 
